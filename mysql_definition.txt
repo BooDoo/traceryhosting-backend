@@ -1,11 +1,30 @@
+CREATE TABLE `instances` (
+  `client_id` varchar(64) NOT NULL,
+  `client_secret` varchar(64) NOT NULL,
+  `domain` nvarchar(95) NOT NULL,
+  `blacklisted` bit DEFAULT 0,
+  `display_name` nvarchar(1024) DEFAULT NULL,
+  `application_name` nvarchar(64) DEFAULT 'TraceryHostingFork',
+  PRIMARY KEY(`domain`)
+);
+
 CREATE TABLE `traceries` (
-  `token` varchar(64) NOT NULL,
-  `token_secret` varchar(64) DEFAULT NULL,
-  `screen_name` varchar(15) DEFAULT NULL,
+  `bearer` varchar(64) NOT NULL,
+  `username` varchar(64) DEFAULT NULL,
+  `acct` nvarchar(64) DEFAULT NULL,
+  `id` varchar(64) NOT NULL DEFAULT '',
+  `url` nvarchar(192) NOT NULL,
+  `instance` nvarchar(95) NOT NULL DEFAULT 'botsin.space',
   `frequency` int(12) DEFAULT NULL,
   `tracery` mediumtext,
-  `user_id` varchar(64) NOT NULL DEFAULT '',
   `public_source` tinyint(1) DEFAULT NULL,
   `blocked_status` smallint(6) DEFAULT NULL,
-  PRIMARY KEY (`user_id`)
+  `is_sensitive` smallint(6) DEFAULT 0,
+  `does_replies` tinyint(1) DEFAULT '0',
+  `reply_rules` mediumtext,
+  `last_reply` nvarchar(64) DEFAULT 1,
+  `created_on` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `last_updated` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (instance) REFERENCES instances(domain),
+  PRIMARY KEY (`url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

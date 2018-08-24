@@ -10,18 +10,31 @@ var replies = (arg0 === "replies");
 var frequency = parseInt(arg0, 10);
 //obv only one of these will be true
 
-
-
 var tracery = require('tracery-grammar');
 var _ = require('underscore');
 
-var Twit = require('twit');
+var Mastodon = require('mastodon-api');
 
+const path = require('path');
+const os = require('os');
+const he = require('he');
+const textVersion = require('textversionjs');
+
+var fs = require('pn/fs');
 var svg2png = require('svg2png');
-var fs = require('fs');
 var heapdump = require('heapdump');
 var util = require("util");
+const request = require('request');
 const fetch = require('node-fetch');
+
+_.mixin({
+	guid : function(){
+	  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+	    var r = Math.random()*16|0, v = c == 'x' ? r : (r&0x3|0x8);
+	    return v.toString(16);
+	  });
+	}
+});
 
 
 function log_line_single(message)
@@ -34,7 +47,7 @@ function log_line_single(message)
 	);
 }
 
-function log_line(screen_name, userid, message, params)
+function log_line(username, userid, message, params)
 {
 	if (params)
 	{
@@ -46,7 +59,7 @@ function log_line(screen_name, userid, message, params)
 		new Date().toISOString(),
 		"arg:" + arg0,
 		"INFO",
-		screen_name,
+		username,
 		"(" + userid + ")",
 		message,
 		paramString ? paramString : ""
@@ -63,7 +76,7 @@ function log_line_single_error(message)
 	);
 }
 
-function log_line_error(screen_name, userid, message, params)
+function log_line_error(username, userid, message, params)
 {
 	if (params)
 	{
@@ -75,47 +88,40 @@ function log_line_error(screen_name, userid, message, params)
 		new Date().toISOString(),
 		"arg:" + arg0,
 		"ERROR",
-		screen_name,
+		username,
 		"(" + userid + ")",
 		message,
 		paramString ? paramString : ""
 	);
 }
 
-async function generate_svg(svg_text, T)
+async function generate_svg(svg_text, M)
 {
-	let data = await svg2png(new Buffer(svg_text));
-	let media_id = await uploadMedia(data.toString('base64'), T);
+	let TMP_PATH = path.join(os.tmpdir(), `cbts${_.guid()}.png`);
+	let data = await svg2png(Buffer.from(svg_text));
+	let written = await fs.writeFile(TMP_PATH, data);
+	log_line(null, null, "Wrote temp PNG @ " + TMP_PATH);
+	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), M);
 	return media_id;
 }
 
-async function fetch_img(url, T)
+async function fetch_img(url, M)
 {
-	log_line(null, null, "fetching " + url);
-	let response = await fetch(url);
-	if (response.ok)
-	{
-		log_line(null, null, "fetched " + url);
-		let buffer = await response.buffer();
-		let media_id = await uploadMedia(buffer.toString('base64'), T); //doesn't allow gifs/movies
-		return media_id;
-	}
-	else
-	{
-		throw(new Error("couldn't fetch " + url + ", returned " + response.status));
-	}
+	log_line(null, null, "passing " + url + " to request");
+	let media_id = await uploadMedia(request(url), M); //doesn't allow gifs/movies
+	return media_id;
 }
 
-async function uploadMediaChunked(buffer, mimeType, T)
+async function uploadMediaChunked(buffer, mimeType, M)
 {
 	//todo see https://github.com/ttezel/twit/blob/master/tests/rest_chunked_upload.js#L20
 	//get mimeType with https://www.npmjs.com/package/file-type
 
 }
 
-async function uploadMedia(b64data, T)
+async function uploadMedia(readStream, M)
 {
-	var {data, resp} = await T.post('media/upload', { media_data: b64data });
+	var {data, resp} = await M.post('/media', { file: readStream });
 
 
 	if (data.errors)
@@ -159,9 +165,12 @@ async function uploadMedia(b64data, T)
 			throw (err);
 		}
 	}
-
+	if (data.type == 'unknown') {
+		log_line_error(null,null, "Can't upload media, Bad Stream(?)", data);
+		throw (new Error ("Can't upload media, Bad Stream(?) - type unknown"));
+	}
 	log_line(null, null, "uploaded media", data);
-	return data.media_id_string;
+	return data.id;
 }
 
 // this is much more complex than i thought it would be
@@ -205,7 +214,7 @@ function removeBrackets (text) {
 }
 
 
-function render_media_tag(match, T)
+function render_media_tag(match, M)
 {
 	var unescapeOpenBracket = /\\{/g;
 	var unescapeCloseBracket = /\\}/g;
@@ -214,11 +223,11 @@ function render_media_tag(match, T)
 
 	if (match.indexOf("svg ") === 1)
 	{
-		return generate_svg(match.substr(5,match.length - 6), T);
+		return generate_svg(match.substr(5,match.length - 6), M);
 	}
 	else if (match.indexOf("img ") === 1)
 	{
-		return fetch_img(match.substr(5, match.length - 6), T);
+		return fetch_img(match.substr(5, match.length - 6), M);
 	}
 	else
 	{
@@ -226,7 +235,7 @@ function render_media_tag(match, T)
 	}
 }
 
-async function recurse_retry(origin, tries_remaining, processedGrammar, T, result, in_reply_to)
+async function recurse_retry(origin, tries_remaining, processedGrammar, M, result, in_reply_to)
 {
 	if (tries_remaining <= 0)
 	{
@@ -235,54 +244,55 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 
 	try
 	{
-		var tweet = processedGrammar.flatten(origin);
-		var tweet_without_image = removeBrackets(tweet);
-		var media_tags = matchBrackets(tweet);
+		var status = processedGrammar.flatten(origin);
+		var status_without_image = removeBrackets(status);
+		var media_tags = matchBrackets(status);
 
 		let params = {};
 
 		if (typeof in_reply_to === 'undefined')
 		{
-			params = { status: tweet_without_image};
+			params = { status: status_without_image};
 		}
 		else
 		{
-			var screen_name = in_reply_to["user"]["screen_name"];
-			params = {status: "@" + screen_name + " " + tweet_without_image, in_reply_to_status_id:in_reply_to["id_str"]}
+			var username = in_reply_to["account"]["acct"];
+			params = {status: "@" + username + " " + status_without_image, in_reply_to_id:in_reply_to["status"]["id"]}
 		}
 
 		if (media_tags)
 		{
+			params['sensitive'] = result['is_sensitive'];
 			let start_time_for_processing_tags = process.hrtime();
 			try 
 			{
-				var media_promises = media_tags.map(tag => render_media_tag(tag, T));
+				var media_promises = media_tags.map(tag => render_media_tag(tag, M));
 				var medias = await Promise.all(media_promises);
 				params.media_ids = medias;
 			}
 			catch (err)
 			{
-				log_line_error(result["screen_name"], result["user_id"], "failed rendering and uploading media", err);
-				recurse_retry(origin, tries_remaining - 1, processedGrammar, T, result, in_reply_to);
+				log_line_error(result["username"], result["url"], "failed rendering and uploading media", err);
+				recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				return;
 			}
 			let processing_time = process.hrtime(start_time_for_processing_tags);
 			if (processing_time[0] > 5) {
-				log_line(result["screen_name"], result["user_id"], `processing media tags took ${processing_time[0]}:${processing_time[1]}`);
+				log_line(result["username"], result["url"], `processing media tags took ${processing_time[0]}:${processing_time[1]}`);
 			}
 			if (processing_time[0] > 30) {
 				Raven.captureMessage("Processing media tags took over 30 secs", 
 				{
 					user: 
 					{
-						username: result['screen_name'],
-						id : result['user_id']
+						username: result['username'],
+						id : result['url']
 					},
 					extra:
 					{
 						processing_time: processing_time,
 						media_tags : media_tags,
-						tweet : tweet,
+						status : status,
 						params : params,
 						tries_remaining: tries_remaining,
 						mention: in_reply_to,
@@ -294,62 +304,62 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 					
 			}
 		}
-		log_line(result["screen_name"], result["user_id"], "tweeting", params);
+		log_line(result["username"], result["url"], "posting", params);
 
 		try
 		{
-			var {data, resp} = await T.post('statuses/update', params);
+			var {data, resp} = await M.post('/statuses', params);
 
 			if (!resp || resp.statusCode != 200)
 			{
 				if (data.errors){var err = data.errors[0];}
 				else { 
-					log_line(result["screen_name"], result["user_id"], "no explicit error given (maybe HTTP 431)", params);
+					log_line(result["username"], result["url"], "no explicit error given (maybe HTTP 431)", params);
 					return;
 				}
 
 				if (err["code"] == 186) // too long
 				{
-					recurse_retry(origin, tries_remaining - 1, processedGrammar, T, result, in_reply_to);
+					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				}
-				else if (err['code'] == 187) //duplicate tweet
+				else if (err['code'] == 187) //duplicate status
 				{
-					recurse_retry(origin, tries_remaining - 1, processedGrammar, T, result, in_reply_to);
+					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				}
-				else if (err['code'] == 170) //empty tweet
+				else if (err['code'] == 170) //empty status
 				{
-					recurse_retry(origin, tries_remaining - 1, processedGrammar, T, result, in_reply_to);
+					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				}
 					
 				else if (err['code'] == 64)  
 				{
-					log_line(result["screen_name"], result["user_id"], "suspended (64)", params);
+					log_line(result["username"], result["url"], "suspended (64)", params);
 				}
 				else if (err['code'] == 89)  
 				{
-					log_line(result["screen_name"], result["user_id"], "invalid permissions (89)", params);
+					log_line(result["username"], result["url"], "invalid permissions (89)", params);
 				}
 				else if (err['code'] == 326)  
 				{
-					log_line(result["screen_name"], result["user_id"], "temp locked for spam (326)", params);
+					log_line(result["username"], result["url"], "temp locked for spam (326)", params);
 				}
 				else if (err['code'] == 226)  
 				{
-					log_line(result["screen_name"], result["user_id"], "flagged as bot (226)", params);
+					log_line(result["username"], result["url"], "flagged as bot (226)", params);
 				}
 				else if (err['statusCode'] == 404)
 				{
-					log_line(result["screen_name"], result["user_id"], "mystery status (404)", params);
+					log_line(result["username"], result["url"], "mystery status (404)", params);
 				}
 				else
 				{
-					log_line_error(result["screen_name"], result["user_id"], "failed to tweet for a more mysterious reason (" + err["code"] + ")", params);
-					Raven.captureMessage("Failed to tweet, Twiter gave err " + err['code'], 
+					log_line_error(result["username"], result["url"], "failed to post for a more mysterious reason (" + err["code"] + ")", params);
+					Raven.captureMessage("Failed to post, Mastodon gave err " + err['code'], 
 					{
 						user: 
 						{
-							username: result['screen_name'],
-							id : result['user_id']
+							username: result['username'],
+							id : result['url']
 						},
 						extra:
 						{
@@ -366,13 +376,13 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 		}
 		catch (err)
 		{
-			log_line_error(result["screen_name"], result["user_id"], "failed to tweet " + util.inspect(params), err);
+			log_line_error(result["username"], result["url"], "failed to post " + util.inspect(params), err);
 			Raven.captureException(err, 
 			{
 				user: 
 				{
-					username: result['screen_name'],
-					id : result['user_id']
+					username: result['username'],
+					id : result['url']
 				},
 				extra:
 				{
@@ -390,13 +400,13 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 	}
 	catch (e)
 	{
-		log_line_error(result["screen_name"], result["user_id"], "failed to tweet ", err);
+		log_line_error(result["username"], result["url"], "failed to post ", err);
 		Raven.captureException(e, 
 		{
 			user: 
 			{
-				username: result['screen_name'],
-				id : result['user_id']
+				username: result['username'],
+				id : result['url']
 			},
 			extra:
 			{
@@ -405,7 +415,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 				tracery: result['tracery']
 			}
 		});
-		recurse_retry(origin, tries_remaining - 1, processedGrammar, T, result, in_reply_to);
+		recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 	}
 	
 
@@ -413,64 +423,60 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, T, resul
 	
 
 
-async function tweet_for_account(connectionPool, user_id)
+async function post_for_account(connectionPool, url)
 {
-	let [tracery_result, fields] = await connectionPool.query('SELECT token, token_secret, screen_name, user_id, tracery from `traceries` where user_id = ?', [user_id]);
-
+	let [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, tracery from `traceries` where url = ?', [url]);
 
 
 	var processedGrammar = tracery.createGrammar(JSON.parse(tracery_result[0]['tracery']));
 	processedGrammar.addModifiers(tracery.baseEngModifiers); 
 	
-	var T = new Twit(
+	var M = new Mastodon(
 	{
-		consumer_key:         process.env.TWITTER_CONSUMER_KEY
-		, consumer_secret:      process.env.TWITTER_CONSUMER_SECRET
-		, access_token:         tracery_result[0]['token']
-		, access_token_secret:  tracery_result[0]['token_secret']
+		api_url:		"https://" + tracery_result[0]['instance'] + "/api/v1"
+		, access_token:		tracery_result[0]['bearer']
 	}
 	);
 
 	try
 	{
-		await recurse_retry("#origin#", 5, processedGrammar, T, tracery_result[0]);
+		await recurse_retry("#origin#", 5, processedGrammar, M, tracery_result[0]);
 	}
 	catch (e)
 	{
-		log_line_error(tracery_result[0]['screen_name'], user_id, "failed to tweet ", e);
+		log_line_error(tracery_result[0]['username'], url, "failed to post ", e);
 		Raven.captureException(e, 
 		{
 			user: 
 			{
-				username: tracery_result[0]['screen_name'],
-				id : user_id
+				username:	tracery_result[0]['username'],
+				id:		url
 			},
 			extra:
 			{
-				tracery: tracery_result[0]['tracery']
+				tracery:	tracery_result[0]['tracery']
 			}
 		});
 	}
 }
 
-async function reply_for_account(connectionPool, user_id)
+async function reply_for_account(connectionPool, url)
 {
 	
 	if (Math.random() < 0.05)
 	{
+		log_line(null, url, "skipping checking replies due to chance");
 		return;
 	}
 
-	var [tracery_result, fields] = await connectionPool.query('SELECT token, token_secret, screen_name, tracery, user_id, last_reply, reply_rules from `traceries` where user_id = ?', [user_id]);
+	var [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, tracery, last_reply, reply_rules from `traceries` where url = ?', [url]);
 	
 
-	var T = new Twit(
-		{
-			consumer_key:         process.env.TWITTER_CONSUMER_KEY
-		  , consumer_secret:      process.env.TWITTER_CONSUMER_SECRET
-		  , access_token:         tracery_result[0]['token']
-		  , access_token_secret:  tracery_result[0]['token_secret']
-		}
+	var M = new Mastodon(
+	{
+		api_url:		"https://" + tracery_result[0]['instance'] + "/api/v1"
+		, access_token:		tracery_result[0]['bearer']
+	}
 	);
 
 	try
@@ -480,13 +486,13 @@ async function reply_for_account(connectionPool, user_id)
 	}
 	catch (e)
 	{
-		log_line_error(tracery_result[0]['screen_name'], user_id, "failed to parse tracery for reply ", e);
+		log_line_error(tracery_result[0]['username'], url, "failed to parse tracery for reply ", e);
 		Raven.captureException(e, 
 		{
 			user: 
 			{
-				username: tracery_result[0]['screen_name'],
-				id : user_id
+				username: tracery_result[0]['username'],
+				id : url
 			},
 			extra:
 			{
@@ -503,13 +509,13 @@ async function reply_for_account(connectionPool, user_id)
 	}
 	catch(e)
 	{
-		log_line_error(tracery_result[0]['screen_name'], user_id, "failed to parse reply_rules ", e);
+		log_line_error(tracery_result[0]['username'], url, "failed to parse reply_rules ", e);
 		Raven.captureException(e, 
 		{
 			user: 
 			{
-				username: tracery_result[0]['screen_name'],
-				id : user_id
+				username: tracery_result[0]['username'],
+				id : url
 			},
 			extra:
 			{
@@ -525,37 +531,37 @@ async function reply_for_account(connectionPool, user_id)
 	var count = 50;
 	if (last_reply == null)
 	{
-		log_line(tracery_result[0]["screen_name"], tracery_result[0]["user_id"], " last reply null, setting to 1 ");
+		log_line(tracery_result[0]["username"], tracery_result[0]["url"], " last reply null, setting to 1 ");
 		last_reply = "1";
 		count = 1;
 	}
 
-	var {resp, data} = await T.get('statuses/mentions_timeline', {count:count, since_id:last_reply, include_entities: false});
+	var {resp, data} = await M.get('/notifications', {count:count, since_id:last_reply, exclude_types: ["follow", "favourite", "reblog"]});
 
 	if (!resp || resp.statusCode != 200)
 	{
-		log_line(tracery_result[0]["screen_name"], tracery_result[0]["user_id"], " can't fetch mentions, statusCode: " + resp.statusCode + " message:" + resp.statusMessage + " data:", data);
+		log_line(tracery_result[0]["username"], tracery_result[0]["url"], " can't fetch mentions, statusCode: " + resp.statusCode + " message:" + resp.statusMessage + " data:", data);
 	}
 		
 	if (data.length > 0)
 	{
 		try
 		{
-			let [results, fields] = await connectionPool.query("UPDATE `traceries` SET `last_reply` = ? WHERE `user_id` = ?", 
-															   [data[0]["id_str"], tracery_result[0]["user_id"]]);
+			let [results, fields] = await connectionPool.query("UPDATE `traceries` SET `last_reply` = ? WHERE `url` = ?", 
+															   [data[0].status["id"], tracery_result[0]["url"]]);
 		
 
-			log_line(tracery_result[0]["screen_name"], tracery_result[0]["user_id"], " set last_reply to " + data[0]["id_str"]);
+			log_line(tracery_result[0]["username"], tracery_result[0]["url"], " set last_reply to " + data[0].status["id"]);
 		}
 		catch (e)
 		{
-			log_line_error(tracery_result[0]['screen_name'], user_id, "failed to update db for last_reply to " + data[0]["id_str"], e);
+			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + data[0].status["id"], e);
 			Raven.captureException(e, 
 			{
 				user: 
 				{
-					username: tracery_result[0]['screen_name'],
-					id : user_id
+					username: tracery_result[0]['username'],
+					id : url
 				},
 				extra:
 				{
@@ -569,26 +575,28 @@ async function reply_for_account(connectionPool, user_id)
 
 		//now we process the replies
 		for (const mention of data) {
+			let mentionText = he.decode(textVersion(mention.status["content"])).trim();
+
 			try
 			{
-				log_line(tracery_result[0]["screen_name"], tracery_result[0]["user_id"], " replying to ", mention["text"]);
+				log_line(tracery_result[0]["username"], tracery_result[0]["url"], " replying to ", mentionText);
 	
-				var origin = _.find(reply_rules, function(origin,rule) {return new RegExp(rule).test(mention["text"]);});
+				var origin = _.find(reply_rules, function(origin,rule) {return new RegExp(rule).test(mentionText);});
 				if (typeof origin != "undefined")
 				{
-					await recurse_retry(origin, 5, processedGrammar, T, tracery_result[0], mention);
+					await recurse_retry(origin, 5, processedGrammar, M, tracery_result[0], mention);
 				}
 
 			}
 			catch (e)
 			{
-				log_line_error(tracery_result[0]['screen_name'], user_id, "failed to reply ", e);
+				log_line_error(tracery_result[0]['username'], url, "failed to reply ", e);
 				Raven.captureException(e, 
 				{
 					user: 
 					{
-						username: tracery_result[0]['screen_name'],
-						id : user_id
+						username: tracery_result[0]['username'],
+						id : url
 					},
 					extra:
 					{
@@ -627,7 +635,7 @@ async function run()
 
 	if (!replies && !isNaN(frequency))
 	{
-		var [results, fields] = await connectionPool.query('SELECT user_id FROM `traceries` WHERE `frequency` = ? AND IFNULL(`blocked_status`, 0) = 0', [frequency]);
+		var [results, fields] = await connectionPool.query('SELECT url FROM `traceries` WHERE `frequency` = ? AND IFNULL(`blocked_status`, 0) = 0', [frequency]);
 		
 
 		if (typeof results === 'undefined')
@@ -639,12 +647,12 @@ async function run()
 		for (const result of results) {
 			try
 			{
-				await tweet_for_account(connectionPool, result['user_id']);
+				await post_for_account(connectionPool, result['url']);
 			}
 			catch (e)
 			{
-				log_line_single_error("failed to tweet for " + result['user_id']);
-				Raven.captureException(e, { user: { id : result['user_id'] } });
+				log_line_single_error("failed to post for " + result['ur;']);
+				Raven.captureException(e, { user: { id : result['url'] } });
 			}
 		}
 
@@ -654,7 +662,7 @@ async function run()
 
 		try 
 		{
-			var [results, fields] = await connectionPool.query('SELECT user_id FROM `traceries` WHERE `does_replies` = 1 AND IFNULL(`blocked_status`, 0) = 0');
+			var [results, fields] = await connectionPool.query('SELECT url FROM `traceries` WHERE `does_replies` = 1 AND IFNULL(`blocked_status`, 0) = 0');
 		}
 		catch(e)
 		{
@@ -666,12 +674,12 @@ async function run()
 		for (const result of results) {
 			try
 			{
-				await reply_for_account(connectionPool, result['user_id']);
+				await reply_for_account(connectionPool, result['url']);
 			}
 			catch (e)
 			{
-				log_line_single_error("failed to reply for " + result['user_id']);
-				Raven.captureException(e, { user: { id : result['user_id'] } });
+				log_line_single_error("failed to reply for " + result['url']);
+				Raven.captureException(e, { user: { id : result['url'] } });
 			}
 		}
 
