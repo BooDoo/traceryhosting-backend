@@ -548,14 +548,14 @@ async function reply_for_account(connectionPool, url)
 		try
 		{
 			let [results, fields] = await connectionPool.query("UPDATE `traceries` SET `last_reply` = ? WHERE `url` = ?", 
-															   [data[0].status["id"], tracery_result[0]["url"]]);
+															   [data[0]['id'], tracery_result[0]["url"]]);
 		
 
-			log_line(tracery_result[0]["username"], tracery_result[0]["url"], " set last_reply to " + data[0].status["id"]);
+			log_line(tracery_result[0]["username"], tracery_result[0]["url"], " set last_reply to " + data[0]['id']);
 		}
 		catch (e)
 		{
-			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + data[0].status["id"], e);
+			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + data[0]['id'], e);
 			Raven.captureException(e, 
 			{
 				user: 
