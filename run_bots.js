@@ -126,10 +126,9 @@ async function uploadMedia(readStream, M)
 
 	if (data.errors)
 	{
-		if (data.errors[0].code == 64) // suspended
+		if (data.errors === undefined) // placeholder
 		{
-			log_line_error(null, null, "Can't upload media, suspended", data);
-			throw (new Error ("Can't upload media, suspended"));
+			throw (new Error ("This should never happen. Find a priest."));
 		}
 	}
 	if (!resp || resp.statusCode != 200)
@@ -166,8 +165,8 @@ async function uploadMedia(readStream, M)
 		}
 	}
 	if (data.type == 'unknown') {
-		log_line_error(null,null, "Can't upload media, Bad Stream(?)", data);
-		throw (new Error ("Can't upload media, Bad Stream(?) - type unknown"));
+		log_line_error(null,null, "Couldn't upload media, Bad Stream(?)", data);
+		throw (new Error (`Couldn't upload media, Bad Stream(?) - type '${data.type}'`));
 	}
 	log_line(null, null, "uploaded media", data);
 	return data.id;
@@ -318,43 +317,14 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					return;
 				}
 
-				if (err["code"] == 186) // too long
+				if (err["code"] == 666) // too evil (placeholder)
 				{
 					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
-				}
-				else if (err['code'] == 187) //duplicate status
-				{
-					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
-				}
-				else if (err['code'] == 170) //empty status
-				{
-					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
-				}
-					
-				else if (err['code'] == 64)  
-				{
-					log_line(result["username"], result["url"], "suspended (64)", params);
-				}
-				else if (err['code'] == 89)  
-				{
-					log_line(result["username"], result["url"], "invalid permissions (89)", params);
-				}
-				else if (err['code'] == 326)  
-				{
-					log_line(result["username"], result["url"], "temp locked for spam (326)", params);
-				}
-				else if (err['code'] == 226)  
-				{
-					log_line(result["username"], result["url"], "flagged as bot (226)", params);
-				}
-				else if (err['statusCode'] == 404)
-				{
-					log_line(result["username"], result["url"], "mystery status (404)", params);
 				}
 				else
 				{
-					log_line_error(result["username"], result["url"], "failed to post for a more mysterious reason (" + err["code"] + ")", params);
-					Raven.captureMessage("Failed to post, Mastodon gave err " + err['code'], 
+					log_line_error(result["username"], result["url"], `failed to post for a more mysterious reason (${JSON.stringify(err,null,2)})`, params);
+					Raven.captureMessage(`Failed to post, Mastodon gave err ${JSON.stringify(err,null,2)}`, 
 					{
 						user: 
 						{
