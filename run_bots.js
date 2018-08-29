@@ -11,7 +11,7 @@ var frequency = parseInt(arg0, 10);
 //obv only one of these will be true
 
 var tracery = require('tracery-grammar');
-var _ = require('underscore');
+var _ = require('lodash');
 
 var Mastodon = require('mastodon-api');
 
@@ -95,20 +95,20 @@ function log_line_error(username, userid, message, params)
 	);
 }
 
-async function generate_svg(svg_text, M)
+async function generate_svg(svg_text, description="", M)
 {
 	let TMP_PATH = path.join(os.tmpdir(), `cbts${_.guid()}.png`);
 	let data = await svg2png(Buffer.from(svg_text));
 	let written = await fs.writeFile(TMP_PATH, data);
 	log_line(null, null, "Wrote temp PNG @ " + TMP_PATH);
-	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), M);
+	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), description, M);
 	return media_id;
 }
 
-async function fetch_img(url, M)
+async function fetch_img(url, description="", M)
 {
 	log_line(null, null, "passing " + url + " to request");
-	let media_id = await uploadMedia(request(url), M); //doesn't allow gifs/movies
+	let media_id = await uploadMedia(request(url), description, M); // DOES allow gifs/mp4s (they will discard alt text)
 	return media_id;
 }
 
@@ -119,9 +119,14 @@ async function uploadMediaChunked(buffer, mimeType, M)
 
 }
 
-async function uploadMedia(readStream, M)
+async function uploadMedia(readStream, description="", M)
 {
-	var {data, resp} = await M.post('/media', { file: readStream });
+	let params = {file: readStream};
+	if ( ~_.isEmpty(description) ) {
+		params.description = description;
+	}
+
+	var {data, resp} = await M.post('/media', params);
 
 
 	if (data.errors)
@@ -172,6 +177,28 @@ async function uploadMedia(readStream, M)
 	return data.id;
 }
 
+// Returns a "tagObject" like: {img: `https://imgur.com/21324567`} or {cut: `uspol`}
+var prepareTag = function(tag) {
+	const knownTags = ["img", "svg", "cut", "alt"];
+	let match = tag.match(/^\{(img|svg|cut|alt) (.+)\}/);
+	if ( match && match[1] && _.includes(knownTags, match[1]) ) {
+		let tagType = match[1];
+		let tagContent = match[2];
+
+		const unescapeOpenBracket = /\\{/g;
+		const unescapeCloseBracket = /\\}/g;
+		tagContent = tagContent.replace(unescapeOpenBracket, "{");
+		tagContent = tagContent.replace(unescapeCloseBracket, "}");
+
+		toReturn = {};
+		toReturn[tagType] = tagContent;
+		return toReturn;
+
+	} else {
+		console.error(`No known action for ${tag.split(' ')[0]}, ignoring`);
+	}
+}
+
 // this is much more complex than i thought it would be
 // but this function will find our image tags 
 // full credit to BooDooPerson - https://twitter.com/BooDooPerson/status/683450163608817664
@@ -192,7 +219,7 @@ var matchBrackets = function(text) {
     return null;
   }
   else {
-    return matches.map(reverseString).reverse();
+    return matches.map(reverseString).reverse().map(prepareTag);
   }
 }
 
@@ -213,24 +240,22 @@ function removeBrackets (text) {
 }
 
 
-function render_media_tag(match, M)
+function render_media_tag(tagObject, description="", M)
 {
-	var unescapeOpenBracket = /\\{/g;
-	var unescapeCloseBracket = /\\}/g;
-	match = match.replace(unescapeOpenBracket, "{");
-	match = match.replace(unescapeCloseBracket, "}");
+	let tagType = _(tagObject).keys().first();
+	let tagContent = _(tagObject).values().first();
 
-	if (match.indexOf("svg ") === 1)
+	if (tagType === "svg")
 	{
-		return generate_svg(match.substr(5,match.length - 6), M);
+		return generate_svg(tagContent, description, M);
 	}
-	else if (match.indexOf("img ") === 1)
+	else if (tagType === "img")
 	{
-		return fetch_img(match.substr(5, match.length - 6), M);
+		return fetch_img(tagContent, description, M);
 	}
 	else
 	{
-		throw(new Error("error {" + match.substr(1,4) + "... not recognized"));
+		throw(new Error("error {" + tagType + "... not recognized"));
 	}
 }
 
@@ -244,43 +269,67 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 	try
 	{
 		var status = processedGrammar.flatten(origin);
-		var status_without_image = removeBrackets(status);
-		var media_tags = matchBrackets(status);
+		var status_without_meta = removeBrackets(status);
+		var meta_tags = matchBrackets(status);
 
+		let medias = [];
+		let cw_label = null;
+		let alt_tags = [];
 		let params = {};
+		let hide_media = null;
 
 		if (typeof in_reply_to === 'undefined')
 		{
-			params = { status: status_without_image};
+			params = { status: status_without_meta};
 		}
 		else
 		{
 			var username = in_reply_to["account"]["acct"];
-			params = {status: "@" + username + " " + status_without_image, in_reply_to_id:in_reply_to["status"]["id"]}
+			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id:in_reply_to["status"]["id"]}
 		}
 
-		if (media_tags)
+		if (!_.isEmpty(meta_tags))
 		{
 			params['sensitive'] = result['is_sensitive'];
 			let start_time_for_processing_tags = process.hrtime();
 			try 
 			{
-				var media_promises = media_tags.map(tag => render_media_tag(tag, M));
+				// Prep synchronous tags and assign to params where applicable
+				cw_label = meta_tags.find(tagObject=> _.has(tagObject, "cut")); // we take the first CUT, or leave it undefined
+				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt"); // we take all ALT tags, in sequence
+				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")).length; // 0 or 1
+
+				if (!_.isEmpty(cw_label)) {
+					params.spoiler_text = cw_label;
+				}
+
+				params.sensitive = hide_media || process.env.IS_SENSITIVE;
+
+				// Kick off promises for media rendering/retrieval/upload
+				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
+				let media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
+				var media_promises = media_tags.map( (tagObject, index) => {
+					let description = alt_tags[_.min([index, alt_tags.length-1])]; // pair media content with alt tag (if present)
+					return render_media_tag(tagObject, description, M));
+				});
 				var medias = await Promise.all(media_promises);
-				params.media_ids = medias;
+
+				if (!_.isEmpty(medias)) {
+					params.media_ids = medias;
+				}
 			}
 			catch (err)
 			{
-				log_line_error(result["username"], result["url"], "failed rendering and uploading media", err);
+				log_line_error(result["username"], result["url"], "failed processing tags or rendering/uploading media", err);
 				recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				return;
 			}
 			let processing_time = process.hrtime(start_time_for_processing_tags);
 			if (processing_time[0] > 5) {
-				log_line(result["username"], result["url"], `processing media tags took ${processing_time[0]}:${processing_time[1]}`);
+				log_line(result["username"], result["url"], `processing meta tags took ${processing_time[0]}:${processing_time[1]}`);
 			}
 			if (processing_time[0] > 30) {
-				Raven.captureMessage("Processing media tags took over 30 secs", 
+				Raven.captureMessage("Processing meta tags took over 30 secs",
 				{
 					user: 
 					{
@@ -290,7 +339,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					extra:
 					{
 						processing_time: processing_time,
-						media_tags : media_tags,
+						meta_tags : meta_tags,
 						status : status,
 						params : params,
 						tries_remaining: tries_remaining,
@@ -317,7 +366,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					return;
 				}
 
-				if (err["code"] == 666) // too evil (placeholder)
+				if (err["code"] == 666) // too evil (placeholder, replace with known soft failures)
 				{
 					recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 				}
