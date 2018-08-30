@@ -179,8 +179,8 @@ async function uploadMedia(readStream, description="", M)
 
 // Returns a "tagObject" like: {img: `https://imgur.com/21324567`} or {cut: `uspol`}
 var prepareTag = function(tag) {
-	const knownTags = ["img", "svg", "cut", "alt"];
-	let match = tag.match(/^\{(img|svg|cut|alt) (.+)\}/);
+	const knownTags = ["img", "svg", "cut", "alt", "hide"];
+	let match = tag.match(/^\{((?:img|svg|cut|alt) |hide)(.*)\}/);
 	if ( match && match[1] && _.includes(knownTags, match[1]) ) {
 		let tagType = match[1];
 		let tagContent = match[2];
@@ -290,7 +290,6 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 
 		if (!_.isEmpty(meta_tags))
 		{
-			params['sensitive'] = result['is_sensitive'];
 			let start_time_for_processing_tags = process.hrtime();
 			try 
 			{
@@ -303,7 +302,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					params.spoiler_text = cw_label;
 				}
 
-				params.sensitive = hide_media || process.env.IS_SENSITIVE;
+				params.sensitive = hide_media || result['is_sensitive'];
 
 				// Kick off promises for media rendering/retrieval/upload
 				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
