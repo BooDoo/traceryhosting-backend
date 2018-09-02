@@ -121,7 +121,7 @@ async function uploadMediaChunked(buffer, mimeType, M)
 async function uploadMedia(readStream, description="", M)
 {
 	let params = {file: readStream};
-	if ( ~_.isEmpty(description) ) {
+	if ( !_.isEmpty(description) ) {
 		params.description = description;
 	}
 
@@ -180,8 +180,8 @@ async function uploadMedia(readStream, description="", M)
 var prepareTag = function(tag) {
 	const knownTags = ["img", "svg", "cut", "alt", "hide"];
 	let match = tag.match(/^\{((?:img|svg|cut|alt) |hide)(.*)\}/);
-	if ( match && match[1] && _.includes(knownTags, match[1]) ) {
-		let tagType = match[1];
+	if ( match && match[1] && _.includes(knownTags, match[1].trim()) ) {
+		let tagType = match[1].trim();
 		let tagContent = match[2];
 
 		const unescapeOpenBracket = /\\{/g;
@@ -241,8 +241,8 @@ function removeBrackets (text) {
 
 function render_media_tag(tagObject, description="", M)
 {
-	let tagType = _(tagObject).keys().first();
-	let tagContent = _(tagObject).values().first();
+	let tagType, tagContent;
+	[tagType, tagContent] = _.pairs(tagObject)[0];
 
 	if (tagType === "svg")
 	{
@@ -295,10 +295,10 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				// Prep synchronous tags and assign to params where applicable
 				cw_label = meta_tags.find(tagObject=> _.has(tagObject, "cut")); // we take the first CUT, or leave it undefined
 				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt")); // we take all ALT tags, in sequence
-				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")).length; // 0 or 1
+				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")); // undefined or [{"hide": ""...}]
 
 				if (!_.isEmpty(cw_label)) {
-					params.spoiler_text = cw_label;
+					params.spoiler_text = cw_label["cut"];
 				}
 
 				params.sensitive = hide_media || result['is_sensitive'];
@@ -308,6 +308,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				let media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
 				var media_promises = media_tags.map( (tagObject, index) => {
 					let description = alt_tags[_.min([index, alt_tags.length-1])]; // pair media content with alt tag (if present)
+					if (_.has(description, "alt")) { description = description.alt; } // or fallback to undefined
 					return render_media_tag(tagObject, description, M);
 				});
 				var medias = await Promise.all(media_promises);
