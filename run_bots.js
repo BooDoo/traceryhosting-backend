@@ -25,7 +25,6 @@ var svg2png = require('svg2png');
 var heapdump = require('heapdump');
 var util = require("util");
 const request = require('request');
-const fetch = require('node-fetch');
 
 _.mixin({
 	guid : function(){
@@ -309,7 +308,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				let media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
 				var media_promises = media_tags.map( (tagObject, index) => {
 					let description = alt_tags[_.min([index, alt_tags.length-1])]; // pair media content with alt tag (if present)
-					return render_media_tag(tagObject, description, M));
+					return render_media_tag(tagObject, description, M);
 				});
 				var medias = await Promise.all(media_promises);
 
