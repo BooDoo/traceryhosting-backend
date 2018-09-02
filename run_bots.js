@@ -276,6 +276,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		let alt_tags = [];
 		let params = {};
 		let hide_media = null;
+		let show_media = null;
 
 		if (typeof in_reply_to === 'undefined')
 		{
@@ -296,12 +297,29 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				cw_label = meta_tags.find(tagObject=> _.has(tagObject, "cut")); // we take the first CUT, or leave it undefined
 				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt")); // we take all ALT tags, in sequence
 				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")); // undefined or [{"hide": ""...}]
+				show_media = meta_tags.find(tagObject=>_.has(tagObject, "show"));
+
+				if (hide_media && show_media) {
+					hide_media = true; // both given explicitly, prefer to HIDE
+					show_media = false;
+				}
+				else if (show_media) {
+					hide_media = false;
+				}
+				else if (hide_media) {
+					show_media = false;
+				}
+				else {
+					// nether show nor hide given explicitly, look at standard inheritance
+					hide_media = hide_media || result['is_sensitive'];
+					hide_media = hide_media || !_.isEmpty(cw_label);
+				}
 
 				if (!_.isEmpty(cw_label)) {
 					params.spoiler_text = cw_label["cut"];
 				}
 
-				params.sensitive = hide_media || result['is_sensitive'];
+				params.sensitive = hide_media;
 
 				// Kick off promises for media rendering/retrieval/upload
 				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
