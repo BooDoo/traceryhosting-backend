@@ -295,7 +295,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 			{
 				// Prep synchronous tags and assign to params where applicable
 				cw_label = meta_tags.find(tagObject=> _.has(tagObject, "cut")); // we take the first CUT, or leave it undefined
-				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt"); // we take all ALT tags, in sequence
+				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt")); // we take all ALT tags, in sequence
 				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")).length; // 0 or 1
 
 				if (!_.isEmpty(cw_label)) {
