@@ -35,5 +35,7 @@ These are in UTC.
   - [X] Strip out twitter error code checking
   - [X] Support `{cut …}` format for CW on status
   - [X] Support `{alt …}` format for media descriptions
+  - [ ] Treat direct messages as mentions
+  - [ ] Clean up log line format/calls
   - [ ] Genericize some copypasta?
   - [ ] write tests. I know, *I know*, but you really need to.
