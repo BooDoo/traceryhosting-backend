@@ -12,6 +12,7 @@ var frequency = parseInt(arg0, 10);
 
 var tracery = require('tracery-grammar');
 var _ = require('lodash');
+_.pairs = _.toPairs;
 
 var Mastodon = require('mastodon-api');
 
