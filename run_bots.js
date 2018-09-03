@@ -179,8 +179,8 @@ async function uploadMedia(readStream, description="", M)
 
 // Returns a "tagObject" like: {img: `https://imgur.com/21324567`} or {cut: `uspol`}
 var prepareTag = function(tag) {
-	const knownTags = ["img", "svg", "cut", "alt", "hide"];
-	let match = tag.match(/^\{((?:img|svg|cut|alt) |hide)(.*)\}/);
+	const knownTags = ["img", "svg", "cut", "alt", "hide", "show"];
+	let match = tag.match(/^\{((?:img|svg|cut|alt) |hide|show)(.*)\}/);
 	if ( match && match[1] && _.includes(knownTags, match[1].trim()) ) {
 		let tagType = match[1].trim();
 		let tagContent = match[2];
@@ -278,6 +278,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		let params = {};
 		let hide_media = null;
 		let show_media = null;
+		let media_tags = [];
 
 		if (typeof in_reply_to === 'undefined')
 		{
@@ -324,7 +325,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 
 				// Kick off promises for media rendering/retrieval/upload
 				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
-				let media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
+				media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
 				var media_promises = media_tags.map( (tagObject, index) => {
 					let description = alt_tags[_.min([index, alt_tags.length-1])]; // pair media content with alt tag (if present)
 					if (_.has(description, "alt")) { description = description.alt; } // or fallback to undefined
