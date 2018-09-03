@@ -32,8 +32,8 @@ These are in UTC.
 # TODO:
   - [X] Target Mastodon instance
   - [X] Change media from Buffers to ReadStreams (v1) to be compatible with [mastodon-api](https://github.com/vanita5/mastodon-api)
-  - [ ] Strip out twitter error code checking
-  - [ ] Support `{cut …}` format for CW on status
-  - [ ] Support `{alt …}` format for media descriptions
+  - [X] Strip out twitter error code checking
+  - [X] Support `{cut …}` format for CW on status
+  - [X] Support `{alt …}` format for media descriptions
   - [ ] Genericize some copypasta?
   - [ ] write tests. I know, *I know*, but you really need to.
