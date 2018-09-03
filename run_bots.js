@@ -330,7 +330,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					if (_.has(description, "alt")) { description = description.alt; } // or fallback to undefined
 					return render_media_tag(tagObject, description, M);
 				});
-				var medias = await Promise.all(media_promises);
+				medias = await Promise.all(media_promises);
 
 				if (!_.isEmpty(medias)) {
 					params.media_ids = medias;
