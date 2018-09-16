@@ -286,8 +286,10 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		}
 		else
 		{
-			var username = in_reply_to["account"]["acct"];
-			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id:in_reply_to["status"]["id"]}
+			let username = in_reply_to.account.acct;
+			let id = in_reply_to.status.id;
+			let visibility = in_reply_to.status.visibility;
+			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id: id, visibility: visibility};
 		}
 
 		if (!_.isEmpty(meta_tags))
