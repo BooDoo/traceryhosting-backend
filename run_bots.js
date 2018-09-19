@@ -281,7 +281,8 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		let hide_media = null;
 		let show_media = null;
 		let visibility = result.visibility;
-		let mention_visibility = null;
+		let their_visibility = null;
+		let our_visibility = null;
 		let meta_visibility = null;
 		let media_tags = [];
 
@@ -293,7 +294,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		{
 			let username = in_reply_to.account.acct;
 			let id = in_reply_to.status.id;
-			mention_visibility = in_reply_to.status.visibility;
+			their_visibility = in_reply_to.status.visibility;
 			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id: id};
 		}
 
@@ -388,7 +389,8 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 
 		// override stored default visibility with meta_tag visibility (if present)
 		// take the mention's visibility instead if it is more private.
-		params.visibility = _([meta_visibility || result.visibility, mention_visibility]).sortBy(v=>VISIBILITIES.indexOf(v)).last();
+		our_visibility = meta_visibility || visibility;
+		params.visibility = _([our_visibility, their_visibility]).sortBy(v=>VISIBILITIES.indexOf(v)).last();
 
 		log_line(result["username"], result["url"], "posting", params);
 
