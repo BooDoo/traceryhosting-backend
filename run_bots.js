@@ -280,7 +280,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		let params = {};
 		let hide_media = null;
 		let show_media = null;
-		let visibility = VISIBILITIES.indexOf(result.visibility);
+		let visibility = result.visibility;
 		let mention_visibility = null;
 		let meta_visibility = null;
 		let media_tags = [];
@@ -293,7 +293,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		{
 			let username = in_reply_to.account.acct;
 			let id = in_reply_to.status.id;
-			mention_visibility = VISIBILITIES.indexOf(in_reply_to.status.visibility);
+			mention_visibility = in_reply_to.status.visibility;
 			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id: id};
 		}
 
@@ -331,7 +331,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				params.sensitive = hide_media;
 
 				// mutex visibility tags, prefer privacy
-				meta_visibility = _.lastIndexOf(VISIBILITIES, vis=>
+				meta_visibility = _.findLast(VISIBILITIES, vis=>
 							meta_tags.find(tagObject=>
 								tagObject.hasOwnProperty(vis)
 				));
@@ -386,17 +386,9 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 			}
 		}
 
-		// take the more private of the mention's visibility or grammar's explicitly tagged visibility
-		// if neither is present, we'll fall back to the stored default.
-		if ( (mention_visibility >= meta_visibility) && (mention_visibility >= visibility)) {
-			params.visibility = mention_visibility;
-		}
-		else if (meta_visibility !== null) {
-			params.visibility = meta_visibility;
-		}
-		else {
-			params.visibility = visibility;
-		}
+		// override stored default visibility with meta_tag visibility (if present)
+		// take the mention's visibility instead if it is more private.
+		params.visibility = _([meta_visibility || result.visibility, mention_visibility]).sortBy(v=>VISIBILITIES.indexOf(v)).last();
 
 		log_line(result["username"], result["url"], "posting", params);
 
