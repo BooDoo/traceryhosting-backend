@@ -272,12 +272,17 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		var status_without_meta = removeBrackets(status);
 		var meta_tags = matchBrackets(status);
 
+		const VISIBILITIES = ["public", "unlisted", "private", "direct"];
+
 		let medias = [];
 		let cw_label = null;
 		let alt_tags = [];
 		let params = {};
 		let hide_media = null;
 		let show_media = null;
+		let visibility = VISIBILITIES.indexOf(result.visibility);
+		let mention_visibility = null;
+		let meta_visibility = null;
 		let media_tags = [];
 
 		if (typeof in_reply_to === 'undefined')
@@ -288,8 +293,8 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		{
 			let username = in_reply_to.account.acct;
 			let id = in_reply_to.status.id;
-			let visibility = in_reply_to.status.visibility;
-			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id: id, visibility: visibility};
+			mention_visibility = VISIBILITIES.indexOf(in_reply_to.status.visibility);
+			params = {status: "@" + username + " " + status_without_meta, in_reply_to_id: id};
 		}
 
 		if (!_.isEmpty(meta_tags))
@@ -324,6 +329,13 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				}
 
 				params.sensitive = hide_media;
+
+				// mutex visibility tags, prefer privacy
+				meta_visibility = _.lastIndexOf(VISIBILITIES, vis=>
+							meta_tags.find(tagObject=>
+								tagObject.hasOwnProperty(vis)
+				));
+
 
 				// Kick off promises for media rendering/retrieval/upload
 				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
@@ -373,6 +385,19 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					
 			}
 		}
+
+		// take the more private of the mention's visibility or grammar's explicitly tagged visibility
+		// if neither is present, we'll fall back to the stored default.
+		if ( (mention_visibility >= meta_visibility) && (mention_visibility >= visibility)) {
+			params.visibility = mention_visibility;
+		}
+		else if (meta_visibility !== null) {
+			params.visibility = meta_visibility;
+		}
+		else {
+			params.visibility = visibility;
+		}
+
 		log_line(result["username"], result["url"], "posting", params);
 
 		try
@@ -465,7 +490,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 
 async function post_for_account(connectionPool, url)
 {
-	let [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, tracery from `traceries` where url = ?', [url]);
+	let [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, visibility, tracery from `traceries` where url = ?', [url]);
 
 
 	var processedGrammar = tracery.createGrammar(JSON.parse(tracery_result[0]['tracery']));
@@ -509,7 +534,7 @@ async function reply_for_account(connectionPool, url)
 		return;
 	}
 
-	var [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, tracery, last_reply, reply_rules from `traceries` where url = ?', [url]);
+	var [tracery_result, fields] = await connectionPool.query('SELECT bearer, instance, username, url, is_sensitive, visibility, tracery, last_reply, reply_rules from `traceries` where url = ?', [url]);
 	
 
 	var M = new Mastodon(
