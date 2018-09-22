@@ -12,8 +12,6 @@ var frequency = parseInt(arg0, 10);
 
 var tracery = require('tracery-grammar');
 var _ = require('lodash');
-_.pairs = _.toPairs;
-
 var Mastodon = require('mastodon-api');
 
 const path = require('path');
@@ -243,7 +241,7 @@ function removeBrackets (text) {
 function render_media_tag(tagObject, description="", M)
 {
 	let tagType, tagContent;
-	[tagType, tagContent] = _.pairs(tagObject)[0];
+	[tagType, tagContent] = _.toPairs(tagObject)[0];
 
 	if (tagType === "svg")
 	{
