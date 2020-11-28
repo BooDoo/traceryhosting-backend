@@ -1,10 +1,3 @@
-var git = require('git-rev-sync');
-var Raven = require('raven');
-Raven.config(process.env.SENTRY_DSN, {
-	environment: process.env.ENVIRONMENT_NAME,
-	release: git.long()
-}).install();
-
 var arg0 = process.argv[2];
 var replies = (arg0 === "replies");
 var frequency = parseInt(arg0, 10);
@@ -33,7 +26,6 @@ _.mixin({
 	  });
 	}
 });
-
 
 function log_line_single(message)
 {
@@ -154,14 +146,6 @@ async function uploadMedia(readStream, description="", M)
 		else
 		{
 			var err = new Error("Couldn't upload media, got response status " + resp.statusCode + " (" + resp.statusMessage + ")");
-			Raven.captureException(err,
-				{
-					extra:
-					{
-						response : resp,
-						data : data
-					}
-				});
 
 			log_line_error(null, null, err, data);
 			throw (err);
@@ -361,27 +345,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				log_line(result["username"], result["url"], `processing meta tags took ${processing_time[0]}:${processing_time[1]}`);
 			}
 			if (processing_time[0] > 30) {
-				Raven.captureMessage("Processing meta tags took over 30 secs",
-				{
-					user: 
-					{
-						username: result['username'],
-						id : result['url']
-					},
-					extra:
-					{
-						processing_time: processing_time,
-						meta_tags : meta_tags,
-						status : status,
-						params : params,
-						tries_remaining: tries_remaining,
-						mention: in_reply_to,
-						tracery: result['tracery'],
-						response : resp,
-						data : data
-					}
-				});
-					
+				log_line_error("Processing meta tags took over 30 secs");
 			}
 		}
 
@@ -411,67 +375,19 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				else
 				{
 					log_line_error(result["username"], result["url"], `failed to post for a more mysterious reason (${JSON.stringify(err,null,2)})`, params);
-					Raven.captureMessage(`Failed to post, Mastodon gave err ${JSON.stringify(err,null,2)}`, 
-					{
-						user: 
-						{
-							username: result['username'],
-							id : result['url']
-						},
-						extra:
-						{
-							params : params,
-							tries_remaining: tries_remaining,
-							mention: in_reply_to,
-							tracery: result['tracery'],
-							response : resp,
-							data : data
-						}
-					});
 				}
 			}
 		}
 		catch (err)
 		{
-			log_line_error(result["username"], result["url"], "failed to post " + util.inspect(params), err);
-			Raven.captureException(err, 
-			{
-				user: 
-				{
-					username: result['username'],
-					id : result['url']
-				},
-				extra:
-				{
-					params : params,
-					tries_remaining: tries_remaining,
-					mention: in_reply_to,
-					tracery: result['tracery'],
-					response : resp,
-					data : data
-				}
-			});
-			throw (err);
+			log_line_error(result["username"], result["url"], "failed to post " + util.inspect(params), err.code);
+			recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 		}
 				
 	}
 	catch (e)
 	{
 		log_line_error(result["username"], result["url"], "failed to post ", err);
-		Raven.captureException(e, 
-		{
-			user: 
-			{
-				username: result['username'],
-				id : result['url']
-			},
-			extra:
-			{
-				tries_remaining: tries_remaining,
-				mention: in_reply_to,
-				tracery: result['tracery']
-			}
-		});
 		recurse_retry(origin, tries_remaining - 1, processedGrammar, M, result, in_reply_to);
 	}
 	
@@ -502,18 +418,6 @@ async function post_for_account(connectionPool, url)
 	catch (e)
 	{
 		log_line_error(tracery_result[0]['username'], url, "failed to post ", e);
-		Raven.captureException(e, 
-		{
-			user: 
-			{
-				username:	tracery_result[0]['username'],
-				id:		url
-			},
-			extra:
-			{
-				tracery:	tracery_result[0]['tracery']
-			}
-		});
 	}
 }
 
@@ -544,20 +448,6 @@ async function reply_for_account(connectionPool, url)
 	catch (e)
 	{
 		log_line_error(tracery_result[0]['username'], url, "failed to parse tracery for reply ", e);
-		Raven.captureException(e, 
-		{
-			user: 
-			{
-				username: tracery_result[0]['username'],
-				id : url
-			},
-			extra:
-			{
-				tracery: tracery_result[0]['tracery'],
-				reply_rules : tracery_result[0]["reply_rules"],
-				last_reply : tracery_result[0]["last_reply"]
-			}
-		});
 	}
 
 	try
@@ -567,20 +457,6 @@ async function reply_for_account(connectionPool, url)
 	catch(e)
 	{
 		log_line_error(tracery_result[0]['username'], url, "failed to parse reply_rules ", e);
-		Raven.captureException(e, 
-		{
-			user: 
-			{
-				username: tracery_result[0]['username'],
-				id : url
-			},
-			extra:
-			{
-				tracery: tracery_result[0]['tracery'],
-				reply_rules : tracery_result[0]["reply_rules"],
-				last_reply : tracery_result[0]["last_reply"]
-			}
-		});
 	}
 
 
@@ -613,20 +489,6 @@ async function reply_for_account(connectionPool, url)
 		catch (e)
 		{
 			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + data[0]['id'], e);
-			Raven.captureException(e, 
-			{
-				user: 
-				{
-					username: tracery_result[0]['username'],
-					id : url
-				},
-				extra:
-				{
-					tracery: tracery_result[0]['tracery'],
-					reply_rules : tracery_result[0]["reply_rules"],
-					last_reply : tracery_result[0]["last_reply"]
-				}
-			});
 			return;
 		}
 
@@ -648,19 +510,6 @@ async function reply_for_account(connectionPool, url)
 			catch (e)
 			{
 				log_line_error(tracery_result[0]['username'], url, "failed to reply ", e);
-				Raven.captureException(e, 
-				{
-					user: 
-					{
-						username: tracery_result[0]['username'],
-						id : url
-					},
-					extra:
-					{
-						tracery: tracery_result[0]['tracery'],
-						mention: mention
-					}
-				});
 			}
 		}
 	}
@@ -708,8 +557,7 @@ async function run()
 			}
 			catch (e)
 			{
-				log_line_single_error("failed to post for " + result['ur;']);
-				Raven.captureException(e, { user: { id : result['url'] } });
+				log_line_single_error("failed to post for " + result['url']);
 			}
 		}
 
@@ -724,7 +572,6 @@ async function run()
 		catch(e)
 		{
 			log_line_single_error("failed to query db for replies");
-			Raven.captureException(e);
 		}
 
 
@@ -736,7 +583,6 @@ async function run()
 			catch (e)
 			{
 				log_line_single_error("failed to reply for " + result['url']);
-				Raven.captureException(e, { user: { id : result['url'] } });
 			}
 		}
 
