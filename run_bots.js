@@ -478,17 +478,21 @@ async function reply_for_account(connectionPool, url)
 		
 	if (data.length > 0)
 	{
+		// somehow we get 'undefined' values for last_reply from server calls sometimes.
+		// Let's ignore those and keep current value.
+		let last_reply_id = data[0]['id'] || last_reply;
+
 		try
 		{
 			let [results, fields] = await connectionPool.query("UPDATE `traceries` SET `last_reply` = ? WHERE `url` = ?", 
-															   [data[0]['id'], tracery_result[0]["url"]]);
+															   [last_reply_id, tracery_result[0]["url"]]);
 		
 
-			log_line(tracery_result[0]["username"], tracery_result[0]["url"], " set last_reply to " + data[0]['id']);
+			log_line(tracery_result[0]["username"], tracery_result[0]["url"], " set last_reply to " + last_reply_id);
 		}
 		catch (e)
 		{
-			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + data[0]['id'], e);
+			log_line_error(tracery_result[0]['username'], url, "failed to update db for last_reply to " + last_reply_id, e);
 			return;
 		}
 

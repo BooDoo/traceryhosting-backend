@@ -4,7 +4,7 @@ CREATE TABLE `instances` (
   `domain` nvarchar(95) NOT NULL,
   `blacklisted` bit DEFAULT 0,
   `display_name` nvarchar(1024) DEFAULT NULL,
-  `application_name` nvarchar(64) DEFAULT 'TraceryHostingFork',
+  `application_name` nvarchar(64) DEFAULT 'CheapBotsTootSweet',
   PRIMARY KEY(`domain`)
 );
 
@@ -25,6 +25,6 @@ CREATE TABLE `traceries` (
   `last_reply` nvarchar(64) DEFAULT 1,
   `created_on` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `last_updated` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (instance) REFERENCES instances(domain),
+  FOREIGN KEY (instance) REFERENCES instances(domain) ON UPDATE CASCADE,
   PRIMARY KEY (`url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
