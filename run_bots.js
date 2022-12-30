@@ -13,7 +13,7 @@ const he = require('he');
 const textVersion = require('textversionjs');
 
 var fs = require('pn/fs');
-var svg2png = require('svg2png');
+const svgConvert = require('convert-svg-to-png').convert;
 var heapdump = require('heapdump');
 var util = require("util");
 const request = require('request');
@@ -87,8 +87,10 @@ function log_line_error(username, userid, message, params)
 
 async function generate_svg(svg_text, description="", M)
 {
+	const PUPPETEER_OPTIONS = {args: ['--no-sandbox', '--disable-setuid-sandbox']};
+
 	let TMP_PATH = path.join(os.tmpdir(), `cbts${_.guid()}.png`);
-	let data = await svg2png(Buffer.from(svg_text));
+	let data = await svgConvert(svg_text, {puppeteer: PUPPETEER_OPTIONS})
 	let written = await fs.writeFile(TMP_PATH, data);
 	log_line(null, null, "Wrote temp PNG @ " + TMP_PATH);
 	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), description, M);
@@ -177,7 +179,7 @@ var prepareTag = function(tag) {
 		return toReturn;
 
 	} else {
-		console.error(`No known action for ${tag.split(' ')[0]}, ignoring`);
+		console.error(`No known action for ${tag.split(' ')[0]} (of ${_.take(tag, 10)}), ignoring`);
 	}
 }
 
