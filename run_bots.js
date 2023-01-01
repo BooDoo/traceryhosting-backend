@@ -14,7 +14,6 @@ const textVersion = require('textversionjs');
 
 var fs = require('pn/fs');
 const svgConvert = require('convert-svg-to-png').convert;
-var heapdump = require('heapdump');
 var util = require("util");
 const request = require('request');
 
