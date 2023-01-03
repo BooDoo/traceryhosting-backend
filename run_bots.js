@@ -26,6 +26,8 @@ _.mixin({
 	}
 });
 
+const FOCUS_KEYWORDS = initFocusKeywords();
+
 function log_line_single(message)
 {
 	console.log(
@@ -84,7 +86,7 @@ function log_line_error(username, userid, message, params)
 	);
 }
 
-async function generate_svg(svg_text, description="", M)
+async function generate_svg(svg_text, mediaParams={}, M)
 {
 	const PUPPETEER_OPTIONS = {args: ['--no-sandbox', '--disable-setuid-sandbox']};
 
@@ -92,14 +94,14 @@ async function generate_svg(svg_text, description="", M)
 	let data = await svgConvert(svg_text, {puppeteer: PUPPETEER_OPTIONS})
 	let written = await fs.writeFile(TMP_PATH, data);
 	log_line(null, null, "Wrote temp PNG @ " + TMP_PATH);
-	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), description, M);
+	let media_id = await uploadMedia(fs.createReadStream(TMP_PATH), mediaParams, M);
 	return media_id;
 }
 
-async function fetch_img(url, description="", M)
+async function fetch_img(url, mediaParams={}, M)
 {
 	log_line(null, null, "passing " + url + " to request");
-	let media_id = await uploadMedia(request(url), description, M); // DOES allow gifs/mp4s (they will discard alt text)
+	let media_id = await uploadMedia(request(url), mediaParams, M); // DOES allow gifs/mp4s (they will discard alt text)
 	return media_id;
 }
 
@@ -110,15 +112,20 @@ async function uploadMediaChunked(buffer, mimeType, M)
 
 }
 
-async function uploadMedia(readStream, description="", M)
+async function uploadMedia(readStream, mediaParams={}, M)
 {
-	let params = {file: readStream};
-	if ( !_.isEmpty(description) ) {
-		params.description = description;
+
+	if (_.isString(mediaParams)) {
+	  mediaParams = {description: mediaParams}; // somehow got passed alt text only, legacy style
 	}
 
-	var {data, resp} = await M.post('/media', params);
+	mediaParams.file = readStream; // add actual media alongside our meta (description, focus) fields
 
+	if (_.isEmpty(mediaParams.description)) { delete mediaParams.description };
+	if (_.isEmpty(mediaParams.focus)) { delete mediaParams.focus };
+
+	//send our MediaAttachment out to the Masto instance
+	var {data, resp} = await M.post('/media', mediaParams);
 
 	if (data.errors)
 	{
@@ -162,8 +169,8 @@ async function uploadMedia(readStream, description="", M)
 
 // Returns a "tagObject" like: {img: `https://imgur.com/21324567`} or {cut: `uspol`}
 var prepareTag = function(tag) {
-	const knownTags = ["img", "svg", "cut", "alt", "hide", "show", "public", "unlisted", "private", "direct"];
-	let match = tag.match(/^\{((?:img|svg|cut|alt) |hide|show|public|unlisted|private|direct)(.*)\}/);
+	const knownTags = ["img", "svg", "cut", "alt", "hide", "show", "public", "unlisted", "private", "direct", "focus"];
+	let match = tag.match(/^\{((?:img|svg|cut|alt|focus) |hide|show|public|unlisted|private|direct)(.*)\}/);
 	if ( match && match[1] && _.includes(knownTags, match[1].trim()) ) {
 		let tagType = match[1].trim();
 		let tagContent = match[2];
@@ -222,24 +229,65 @@ function removeBrackets (text) {
   return reverseString(text.replace(bracketsRe, ""));
 }
 
-
-function render_media_tag(tagObject, description="", M)
+function render_media_tag(tagObject, mediaParams={}, M)
 {
 	let tagType, tagContent;
 	[tagType, tagContent] = _.toPairs(tagObject)[0];
 
 	if (tagType === "svg")
 	{
-		return generate_svg(tagContent, description, M);
+		return generate_svg(tagContent, mediaParams, M);
 	}
 	else if (tagType === "img")
 	{
-		return fetch_img(tagContent, description, M);
+		return fetch_img(tagContent, mediaParams, M);
 	}
 	else
 	{
 		throw(new Error("error {" + tagType + "... not recognized"));
 	}
+}
+
+function initFocusKeywords() {
+  const keywords = {};
+    keywords.topleft     = keywords.xminymin = [-1.0,1.0];
+    keywords.top         = keywords.xmidymin = [0.0,1.0];
+    keywords.topright    = keywords.xmaxymin = [1.0,1.0];
+    keywords.left        = keywords.xminymid = [-1.0,0.0];
+    keywords.center      = keywords.xmidymid = [0.0,0.0];
+    keywords.right       = keywords.xmaxymid = [1.0,0.0];
+    keywords.bottomleft  = keywords.xminymax = [-1.0,-1.0];
+    keywords.bottom      = keywords.xmidymax = [0.0,-1.0];
+    keywords.bottomright = keywords.xmaxymax = [1.0,-1.0];
+
+  return keywords;
+}
+
+// Take a string and either map from keyword,
+// or parse arbitrarily long comma-separated string and
+// return arr[x,y] with values bounded btwn -1.0,1.0 (defaults: 0.0)
+
+function parseFocusString (focusValues) {
+  const [FOCUS_MIN, FOCUS_MAX] = [-1.0, 1.0];
+
+  let parsedFocusValues;
+  let parsedKeyword = FOCUS_KEYWORDS[focusValues.toLowerCase().replace(/[\s-_,]/g,"")];
+
+  if (parsedKeyword) {
+      parsedFocusValues = parsedKeyword;                // nice! you used a keyword!
+  } else {
+      parsedFocusValues = _.chain(focusValues).         // oh no, you didn't use a keyword...
+	split(','). 					// separate at comma
+	map(v=> _.trim(v," ,;:=_") ).   		// trim junk characters
+	reject(_.isEmpty).				// must have content
+	map(parseFloat).               			// coerce into Number OR NaN
+	without(NaN).	                  		// remove NaN
+	map(v=> _.clamp(v, FOCUS_MIN, FOCUS_MAX) ).	// keep within useable range
+	value();
+  }
+
+  let [x = 0.0, y = 0.0] = parsedFocusValues    // only take first two values
+  return [x,y];                                 // pass back a useable [x,y] array
 }
 
 async function recurse_retry(origin, tries_remaining, processedGrammar, M, result, in_reply_to)
@@ -258,8 +306,9 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 		const VISIBILITIES = ["public", "unlisted", "private", "direct"];
 
 		let medias = [];
-		let cw_label = null;
 		let alt_tags = [];
+		let focus_tags = [];
+		let cw_label = null;
 		let params = {};
 		let hide_media = null;
 		let show_media = null;
@@ -289,6 +338,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				// Prep synchronous tags and assign to params where applicable
 				cw_label = meta_tags.find(tagObject=> _.has(tagObject, "cut")); // we take the first CUT, or leave it undefined
 				alt_tags = meta_tags.filter(tagObject=> _.has(tagObject, "alt")); // we take all ALT tags, in sequence
+				focus_tags = meta_tags.filter(tagObject=> _.has(tagObject, "focus")); // we take all FOCUS tags, in sequence
 				hide_media = meta_tags.find(tagObject=>_.has(tagObject, "hide")); // undefined or [{"hide": ""...}]
 				show_media = meta_tags.find(tagObject=>_.has(tagObject, "show"));
 
@@ -325,9 +375,14 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 				// KNOWN ISSUE: API stores attachment_ids sorted low->high, regardless of media_ids array order
 				media_tags = meta_tags.filter(tagObject=>_(["img","svg"]).includes(Object.keys(tagObject)[0])); // we take all IMG or SVG tags, in sequence
 				var media_promises = media_tags.map( (tagObject, index) => {
+					//TODO: This is copypasta. Abstract out?
 					let description = alt_tags[_.min([index, alt_tags.length-1])]; // pair media content with alt tag (if present)
 					if (_.has(description, "alt")) { description = description.alt; } // or fallback to undefined
-					return render_media_tag(tagObject, description, M);
+
+					let focus = focus_tags[_.min([index, focus_tags.length-1])]; // pair media content with focus tag (if present)
+					if (_.has(focus, "focus")) { focus = focus.focus; } // or fallback to undefined
+
+					return render_media_tag(tagObject, {description, focus}, M);
 				});
 				medias = await Promise.all(media_promises);
 
@@ -599,5 +654,4 @@ async function run()
 }
 
 run();
-
 
