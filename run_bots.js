@@ -380,7 +380,7 @@ async function recurse_retry(origin, tries_remaining, processedGrammar, M, resul
 					if (_.has(description, "alt")) { description = description.alt; } // or fallback to undefined
 
 					let focus = focus_tags[_.min([index, focus_tags.length-1])]; // pair media content with focus tag (if present)
-					if (_.has(focus, "focus")) { focus = focus.focus; } // or fallback to undefined
+					if (_.has(focus, "focus")) { focus = parseFocusString(focus.focus).join(','); } // or fallback to undefined
 
 					return render_media_tag(tagObject, {description, focus}, M);
 				});
