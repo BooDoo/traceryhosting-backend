@@ -469,7 +469,7 @@ async function post_for_account(connectionPool, url)
 
 	try
 	{
-		await recurse_retry("#origin#", 5, processedGrammar, M, tracery_result[0]);
+		await recurse_retry("#origin#", 2, processedGrammar, M, tracery_result[0]);
 	}
 	catch (e)
 	{
@@ -563,7 +563,7 @@ async function reply_for_account(connectionPool, url)
 				var origin = _.find(reply_rules, function(origin,rule) {return new RegExp(rule).test(mentionText);});
 				if (typeof origin != "undefined")
 				{
-					await recurse_retry(origin, 5, processedGrammar, M, tracery_result[0], mention);
+					await recurse_retry(origin, 2, processedGrammar, M, tracery_result[0], mention);
 				}
 
 			}
@@ -602,7 +602,6 @@ async function run()
 	if (!replies && !isNaN(frequency))
 	{
 		var [results, fields] = await connectionPool.query('SELECT url FROM `traceries` WHERE `frequency` = ? AND IFNULL(`blocked_status`, 0) = 0', [frequency]);
-		
 
 		if (typeof results === 'undefined')
 		{
